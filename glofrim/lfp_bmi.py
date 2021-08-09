@@ -9,6 +9,8 @@ from scipy.signal import convolve2d
 import rasterio
 import re
 
+import subprocess
+
 from bmi.wrapper import BMIWrapper as _bmi
 
 from glofrim.utils import setlogger, closelogger
@@ -28,6 +30,7 @@ class LFP(GBmi):
     _output_var_names = ['SGCQin', 'H']
     _area_var_name = 'dA'
     _timeunit = 'seconds'
+    _SWMM_bool = 0
 
     def __init__(self, engine, loglevel=logging.INFO, logger=None):
         self._bmi = _bmi(engine = engine)
@@ -61,6 +64,22 @@ class LFP(GBmi):
         self._mapdir = dirname(glib.getabspath(str(self.get_attribute_value('DEMfile')), _root))
         self._outdir = glib.getabspath(str(self.get_attribute_value('dirroot')), _root)
         self.logger.info('Config initialized')
+        
+        ### DD edits ###
+        all_attribute_names = self.get_attribute_names()
+        for at_name in all_attribute_names:
+            if ':' in at_name:
+                at_name = at_name.split(':')[1]
+            if at_name == 'swmmparamfile':
+                self._SWMM_bool = 1
+                break
+              
+        print(all_attribute_names)
+        if self._SWMM_bool:
+            self.logger.info("SWMM will be run.")
+        else:
+            self.logger.info("SWMM will not be run.")
+        #######################
 
     def initialize_model(self, **kwargs):
         if not hasattr(self, '_config_fn'):
@@ -81,6 +100,11 @@ class LFP(GBmi):
         self.initialize_model()
             
     def update(self, dt=None):
+        ### DD edits ###
+        if self._SWMM_bool:
+            cmd = subprocess.call("/home/ddusseau/swmm51015_engine/build/runswmm5 "+str(self.get_attribute_value('swmmparamfile'))+" "+str(self.get_attribute_value('swmmresultsfile')),shell=True)
+        ################
+        
         # dt in seconds. if not given model timestep is used
         if self._t >= self._endTime:
             raise Exception("endTime already reached, model not updated")
@@ -98,6 +122,12 @@ class LFP(GBmi):
             self._bmi.update()
             self._t = self.get_current_time()
             i += 1
+        
+        #DD edit
+        if self._SWMM_bool:
+            #rename file for next iteration
+            cmd = subprocess.call("mv "+dirname(self._config_fn)+'/'+self.get_attribute_value('swmmnewparamfile')+" "+dirname(self._config_fn)+'/'+self.get_attribute_value('swmmparamfile'),shell=True) # rename file for next time step
+        
         self.logger.info('updated model to datetime {} in {:d} iterations'.format(self._t.strftime("%Y-%m-%d %H:%M:%S"), i))
 
     def update_until(self, t, dt=None):
@@ -213,14 +243,16 @@ class LFP(GBmi):
             self.logger.info('Getting rgrid info based on {}'.format(basename(_dem_fn)))
             with rasterio.open(_dem_fn, 'r') as ds:
                 self.grid = RGrid(ds.transform, ds.height, ds.width, crs=ds.crs, mask=ds.read(1)!=ds.nodata)
-            # riv width file used for "1D coords" 
-            _width_fn = glib.getabspath(str(self.get_attribute_value('SGCwidth')), self._mapdir)
-            if not isfile(_width_fn): raise IOError('SGCwidth file not found')
-            with rasterio.open(_width_fn, 'r') as ds:
-                row, col = np.where(ds.read(1)>0)
-                x, y = self.grid.xy(row=row, col=col)
-                inds = self.grid.ravel_multi_index(row, col)
-            self.grid.set_1d(nodes=np.vstack((x, y)).transpose(), links=None, inds=inds)  # python2.7 nodes=np.array(zip(x, y))
+                
+    #### the coupling feature requires grid and there is an issue reading in the DEM grid so this is commented out
+#            # riv width file used for "1D coords"
+#            _width_fn = glib.getabspath(str(self.get_attribute_value('SGCwidth')), self._mapdir)
+#            if not isfile(_width_fn): raise IOError('SGCwidth file not found')
+#            with rasterio.open(_width_fn, 'r') as ds:
+#                row, col = np.where(ds.read(1)>0)
+#                x, y = self.grid.xy(row=row, col=col)
+#                inds = self.grid.ravel_multi_index(row, col)
+#            self.grid.set_1d(nodes=np.vstack((x, y)).transpose(), links=None, inds=inds)  # python2.7 nodes=np.array(zip(x, y))
         return self.grid
 
 
