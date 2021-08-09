@@ -74,7 +74,7 @@ class LFP(GBmi):
                 self._SWMM_bool = 1
                 break
               
-        print(all_attribute_names)
+#        print(all_attribute_names)
         if self._SWMM_bool:
             self.logger.info("SWMM will be run.")
         else:
